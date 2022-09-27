@@ -1,0 +1,94 @@
+# Création du namespace ns-web
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ns-web
+---
+
+# Création d'un limit range pour toutes les pods situés dans le namespace ns-web. Chaque pods sera limité à maximum 512Mi de mémoire et 200m de charge cpu.
+
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: nginx-limit-range
+  namespace: ns-web
+spec:
+  limits:
+  - default:
+      memory: 512Mi
+      cpu: 200m
+    defaultRequest:
+      memory: 256Mi
+      cpu: 50m
+    type: Container
+---
+
+# Déploiement d'une application nginx avec 3 pods nginx répartit sur les 3 noeuds, et accessible via le port 80. Une règle d'anti-affinité est crée, elle indique au planificateur d'éviter de placer plusieurs répliques avec l' app=nginx étiquette sur un seul nœud (le label city désigne l'emplacement de chaque noeud). Cela crée chaque pods nginx dans un nœud séparé.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  namespace: ns-web
+  labels:
+    app: nginx
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - nginx
+            topologyKey: "city"
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+---
+
+# Création d'un service de type NodePort, exposant l'application nginx sur chaque noeud du cluster et accessible via le port 30001.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-svc
+  namespace: ns-web
+spec:
+  selector:
+    app: nginx
+  ports:
+  - protocol: "TCP"
+    nodePort: 30001
+    port: 80
+  type: NodePort
+---
+
+# Création d'une règle d'autoscalling, permettant de limiter la charge CPU de tout les pods à 25%
+
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-autoscalling
+  namespace: ns-web
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-deployment
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 25 
